@@ -16,6 +16,8 @@ import email.charset
 import email.header
 import email.message
 import email.utils
+import email.mime.multipart
+import email.mime.text
 import warnings
 
 with warnings.catch_warnings():
@@ -486,7 +488,7 @@ def generateMail(subject, body, rev, type):
     else:
         sender = committer
 
-    msg = email.message.Message()
+    msg = email.mime.multipart.MIMEMultipart('alternative')
     msg['From'] = encodeAddressList(sender)
     msg['To'] = encodeAddressList(Config.mailinglist)
     msg['Subject'] = encodeHeader('%s %s' % (emailprefix, subject))
@@ -500,8 +502,8 @@ def generateMail(subject, body, rev, type):
 
     msg['X-Git-Repository'] = encodeHeader(repo)
     msg['X-Mailer'] = encodeHeader('%s %s' % (Name, VERSION))
-    msg.set_payload(body)
-    msg.set_charset('utf-8')
+    msg.attach(email.mime.text.MIMEText(body, 'plain', 'utf-8'))
+    msg.attach(email.mime.text.MIMEText(body, 'html', 'utf-8'))
 
     return msg.as_string()
 
