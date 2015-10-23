@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 
 import getpass
+import htmlify
 import optparse
 import os
 import quopri
@@ -503,7 +504,7 @@ def generateMail(subject, body, rev, type):
     msg['X-Git-Repository'] = encodeHeader(repo)
     msg['X-Mailer'] = encodeHeader('%s %s' % (Name, VERSION))
     msg.attach(email.mime.text.MIMEText(body, 'plain', 'utf-8'))
-    msg.attach(email.mime.text.MIMEText(body, 'html', 'utf-8'))
+    msg.attach(email.mime.text.MIMEText(htmlify.htmlify(body), 'html', 'utf-8'))
 
     return msg.as_string()
 

@@ -1,5 +1,6 @@
 .*.sw?
 test-repo.git
+*.pyc
 *.tar.gz
 README.html
 version.rst
