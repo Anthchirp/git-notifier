@@ -182,7 +182,7 @@ class GitConfig:
             self.mergediffs = set([head.strip() for head in self.mergediffs.split(",")])
 
         if not self.debug:
-            self.log = open(self.log, "a")
+            self.log = open(self.log, "a", 1)
         else:
             self.log = sys.stderr
 
