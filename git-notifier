@@ -555,7 +555,7 @@ def sendMail(subject, out, fname, rev=None, type=None):
     # get sent back-to-back and are likely to end up with identical timestamps,
     # which may then make them appear to have arrived in the wrong order.
     if not Config.debug:
-        time.sleep(2)
+        time.sleep(60)
 
 def entryAdded(key, value, rev):
     if not reportHead(value):
