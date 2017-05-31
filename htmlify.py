@@ -14,7 +14,7 @@ def _mangle_line(line):
   if content.startswith('-'):
     return '<tt style="color:#800">%s</tt>' % (content)
   if content.startswith('+'):
-    return '<tt style="color:#080">%s</tt>' % (content)
+    return '<tt style="color:#008">%s</tt>' % (content)
   return content
 
 def htmlify(text):
