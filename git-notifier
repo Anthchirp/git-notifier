@@ -621,6 +621,31 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd, stat_cmd):
     footer = ""
     show = git(show_cmd)
 
+    # Detect any required JIRA activity
+    show_text = ' '.join(show)
+    import re
+    for ticket in re.findall(r"(fixe?|resolve|close)[sd]? ((MXSW|SCI|SCRATCH)-([1-9][0-9]+))", show_text, re.IGNORECASE):
+      dirname = os.path.basename(os.getcwd())
+      author = show[1].split('<')[0].strip()
+      URL = {
+        'cctbx': 'https://github.com/cctbx/cctbx_project/commit/{0}',
+        'dials': 'https://github.com/dials/dials/commit/{0}',
+        'ispyb-api': 'https://github.com/DiamondLightSource/ispyb-api/commit/{0}',
+        'xia2': 'https://github.com/xia2/xia2/commit/{0}',
+      }.get(dirname, "{dirname}/{commit} by {author}".format(commit=show[0], author=author, dirname=dirname)).format(rev)
+      subprocess.call([
+          "/dls/mx-scratch/jenkins/git-notify/jira",
+          "say",
+          ticket[1],
+           "closed by Jenkins via {URL}".format(URL=URL),
+          ], shell=False)
+      subprocess.call([
+          "/dls/mx-scratch/jenkins/git-notify/jira",
+          "done",
+          ticket[1],
+          ], shell=False)
+    # End of JIRA action.
+
     for line in show:
         if NoDiff in line:
             break
