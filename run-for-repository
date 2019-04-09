@@ -28,6 +28,20 @@ fi
 cd $REPOSITORY
 REPONAME=$(basename $(pwd))
 
+if [ ! -e .git ]; then
+    echo Not a git repository
+    exit 1
+fi
+
+echo "Preparing to run for repository ${REPONAME}"
+git fetch
+git clean -dff .
+git reset --hard "$(git rev-parse --abbrev-ref --symbolic-full-name @{u})"
+
+echo
+git log -1
+echo
+
 if [ ! -f .git-notifier ]; then
     echo "No .git-notifier file found in ${REPOSITORY}";
     exit
@@ -66,15 +80,6 @@ if [ -z "${COMMITLINK}" ]; then
 else
     COMMITLINK_PARAMETER="--link"
 fi
-
-echo "Preparing to run for repository ${REPONAME}"
-git fetch
-git clean -dff .
-git reset --hard "$(git rev-parse --abbrev-ref --symbolic-full-name @{u})"
-
-echo
-git log -1
-echo
 
 COMMITSELECT=""
 if [ ! -z "$OLDCOMMITID" ]; then
