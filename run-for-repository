@@ -71,14 +71,14 @@ LINK="$(config_get link)";
 if [ -z "${LINK}" ]; then
     LINK_PARAMETER=""
 else
-    LINK_PARAMETER="--repouri"
+    LINK_PARAMETER=--repouri="${LINK}"
 fi
 
 COMMITLINK="$(config_get commit_link)";
 if [ -z "${COMMITLINK}" ]; then
     COMMITLINK_PARAMETER=""
 else
-    COMMITLINK_PARAMETER="--link"
+    COMMITLINK_PARAMETER=--link="${COMMITLINK}"
 fi
 
 COMMITSELECT=""
@@ -106,8 +106,8 @@ ${GITNOTIFIER_BASE}/git-notifier \
   --log "${CALL_DIRECTORY}/log-${REPONAME}" \
   --sender="${SENDER_NAME} <diamondlightsource.jenkins@gmail.com>" \
   --replyto="${REPLYTO_USER}@${REPLYTO_HOST}" \
-  ${LINK_PARAMETER} "${LINK}" \
-  ${COMMITLINK_PARAMETER} "${COMMITLINK}" \
+  ${LINK_PARAMETER} \
+  ${COMMITLINK_PARAMETER} \
   ${COMMITSELECT}
 
 ${GITNOTIFIER_BASE}/git-notifier --updateonly \
