@@ -3,7 +3,7 @@
 .. |date| date::
 
 .. Version number is filled in automatically.
-.. |version| replace:: 0.7-17
+.. |version| replace:: 0.7-40
 
 git-notifier
 ============
@@ -258,6 +258,14 @@ The options are:
     ``--mailsubjectlen <max>`` Limits subjects of generated mails to
         ``<max>`` characters. Default os no limit.
 
+    ``--mailheader-* <value>``
+        Any extra header that needs to be set in the mail message.
+        For example, ``--mailheader-X-Repo=Linux`` would result
+        in an ``x-repo: Linux`` header being added to the message.
+        Note that mail headers names are case-insentive and will be
+        converted to lowercase since both ``git-config`` and
+        Python's ``ConfigParser`` return keys in lowercase.
+
     ``--manual [rev1..]rev2``
         Mails out notifications for all revisions on the way from
         ``rev1`` to ``rev2``. If ``rev1`` is skipped, ``rev2~1`` is
@@ -405,6 +413,17 @@ options by prefixing them with ``notifier-``. The
 ``notifier-mailinglist`` options above is an example. To, e.g., set a
 Reply-To header, you would use ``notifier-replyto=somebody@else.net``.
 
+By default, these options apply to both private and public repos.  To
+qualify that a given option should only apply to private repos, one can
+suffix the option with ``-private``.  Simarly, adding ``-public`` will
+cause the option to be applied to just public repos and not private
+ones.  For example::
+
+    [FooRepos]
+    repositories=foo/*
+    notifier-mailinglist-public=foo@bar.com
+    notifier-mailinglist-private=foo-internal@bar.com
+
 Usage
 ^^^^^
 
@@ -417,6 +436,9 @@ Usage
         Runs the script in debug mode, which means that it will (1)
         log more verbosely and to stderr, and (2) run ``git-notifier``
         with the ``--debug`` and ``--noupdate`` options.
+
+    ``--log``
+        Specifies an alternative log file.
 
     ``--update-only``
         Updates the local clones of all repositories, but do es not run

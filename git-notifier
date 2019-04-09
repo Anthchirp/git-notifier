@@ -1,12 +1,16 @@
 #! /usr/bin/env python
 
-import getpass
 import htmlify
+
+import getpass
+import itertools
 import optparse
 import os
 import quopri
+import shlex
 import shutil
 import smtplib
+import string
 import socket
 import subprocess
 import sys
@@ -17,6 +21,8 @@ import email.charset
 import email.header
 import email.message
 import email.utils
+
+
 import email.mime.multipart
 import email.mime.text
 import warnings
@@ -26,25 +32,39 @@ with warnings.catch_warnings():
     # Python 2.6 reports this as deprecated.
     import mimify
 
+
 try:
     # Python 3
-    from configparser import ConfigParser
+    import configparser
     from configparser import NoSectionError
     from configparser import NoOptionError
+
+    class ConfigParser(configparser.ConfigParser):
+        def __init__(self, *args, **kw):
+            kw['interpolation'] = None
+            super(ConfigParser, self).__init__(*args, **kw)
 except ImportError:
     # Python 2
     from ConfigParser import ConfigParser
     from ConfigParser import NoSectionError
     from ConfigParser import NoOptionError
 
-VERSION   = "0.7-17"  # Filled in automatically.
+VERSION    = "0.7-40"  # Filled in automatically.
 
-Name      = "git-notifier"
-CacheFile = ".%s.dat" % Name
-Separator = "\n>---------------------------------------------------------------\n"
-NoDiff    = "[nodiff]"
-NoMail    = "[nomail]"
-CfgName   = "git-notifier.conf"
+Name       = "git-notifier"
+CacheFile  = ".%s.dat" % Name
+Separator  = "\n>---------------------------------------------------------------\n\n"
+NoDiff     = "[nodiff]"
+NoMail     = "[nomail]"
+CfgName    = "git-notifier.conf"
+CfgSection = "git-notifier"
+
+try:
+    # Find Git binary in a cross-platform way
+    # One-liner based on https://stackoverflow.com/a/28909933/2883579
+    GitBinary = next(os.path.join(path, "git") for path in os.environ["PATH"].split(os.pathsep) if os.access(os.path.join(path, "git"), os.X_OK))
+except StopIteration:
+    raise RuntimeError("Git binary not found in PATH")
 
 try:
     # 2-tuple: (name, boolean) with boolen being True if file must exist.
@@ -54,8 +74,7 @@ except KeyError:
 
 gitolite = "GL_USER" in os.environ
 
-mimify.CHARSET = 'UTF-8'
-email.charset.add_charset('utf-8', email.Charset.QP, email.Charset.QP, 'utf-8')
+email.charset.add_charset('utf-8', email.charset.QP, email.charset.QP, 'utf-8')
 
 if "LOGNAME" in os.environ:
     whoami = os.environ["LOGNAME"]
@@ -120,18 +139,18 @@ class State:
         out = open(file, "w")
 
         for (head, ref) in self.heads.items():
-            print >>out, "head", head, ref
+            out.write("head %s %s\n" % (head, ref))
 
         for (tag, ref) in self.tags.items():
-            print >>out, "tag", tag, ref
+            out.write("tag %s %s\n" % (tag, ref))
 
         for rev in self.revs:
-            print >>out, "rev", rev
+            out.write("rev %s\n" % rev)
 
         # No longer used.
         #
         # for rev in self.diffs:
-        #     print >>out, "diff", rev
+        #     out.write("diff %s\n" % rev)
 
     def readFrom(self, file):
         self.clear()
@@ -224,12 +243,19 @@ class GitConfig:
                     # parameter.
                     config.read(cfgpath[0])
             except IOError as e:
-                print >>sys.stderr, "error reading configuration file: %s" % e
+                sys.stderr.write("error reading configuration file: %s\n" % e)
                 sys.exit(1)
 
         elif cfgpath[1]:
-            print >>sys.stderr, "cannot open configuration file: %s" % cfgpath[0]
+            sys.stderr.write("cannot open configuration file: %s\n" % cfgpath[0])
             sys.exit(1)
+
+        mailheaders_names = self.getMailHeaderNamesFromConfigParser(config) \
+            + self.getMailHeaderNamesFromGitConfig() \
+            + self.getMailHeaderNamesFromArgs(args)
+
+        for h in set(mailheaders_names):
+            Options.append([h, True, None, None])
 
         for (name, arg, default, help) in Options:
             conf_default = default
@@ -260,6 +286,10 @@ class GitConfig:
         for (name, arg, default, help) in Options:
             self.__dict__[name] = options.__dict__[name]
 
+    def getMailHeaders(self):
+        return {k.replace("mailheader-", ""):
+                v for k, v in iteritems(self.__dict__) if k.startswith("mailheader-")}
+
     def readUsers(self):
         if self.users and os.path.exists(self.users):
             for line in open(self.users):
@@ -280,34 +310,83 @@ class GitConfig:
     def _get_from_config_parser(self, config, key, arg, default):
         try:
             if arg:
-                return config.get('git-notifier', key)
+                return config.get(CfgSection, key)
             else:
-                return config.getboolean('git-notifier', key)
+                return config.getboolean(CfgSection, key)
         except (NoSectionError, NoOptionError):
             return default
 
+    def getMailHeaderNamesFromConfigParser(self, config):
+        if not config.has_section(CfgSection):
+            return []
+
+        config_items = config.items(CfgSection)
+        return [h[0] for h in config_items if h[0].startswith("mailheader-")]
+
+    def getMailHeaderNamesFromGitConfig(self):
+        # Not using --name-only here since it's only available on Git 2.6+.
+        git_cfgs = git(["config --list"])
+
+        mail_cfgs = []
+        if not git_cfgs:
+            return mail_cfgs
+
+        for cfg in git_cfgs:
+            if cfg.startswith("hooks.mailheader-"):
+                cfg_name = cfg.split("=")[0]
+                mail_cfgs.append(cfg_name[6:])
+
+        return mail_cfgs
+
+    def getMailHeaderNamesFromArgs(self, args):
+        args_headers = []
+        for (i, a) in enumerate(args):
+            if not a.startswith("--mailheader-"):
+                continue
+
+            # Convert the header name to lowercase (but keep value case)
+            # so the behavior is consistent with that of ConfigParser
+            # and git-config.
+            normalized_arg = a[:a.index("=")].lower() + a[a.index("="):]
+            args[i] = normalized_arg
+            args_headers.append(normalized_arg[2:normalized_arg.index("=")])
+
+        return args_headers
+
+def iteritems(d):
+    try:
+        # Python 2
+        return d.iteritems()
+    except AttributeError:
+        # Python 3
+        return iter(d.items())
+
 def log(msg):
-    print >>Config.log, "%s - %s" % (time.asctime(), msg)
+    Config.log.write("%s - %s\n" % (time.asctime(), msg))
 
 def error(msg):
     log("Error: %s" % msg)
     sys.exit(1)
 
 def git(args, stdout_to=subprocess.PIPE, all=False):
+    # Even though we'll split again later, we need to turn a list/tuple into a string
+    # because in some cases one element of the list has more than a single argument.
     if isinstance(args, tuple) or isinstance(args, list):
         args = " ".join(args)
 
+    args = shlex.split(args)
+
     try:
         if Config.debug:
-            print >>sys.stderr, "> git " + args
+            sys.stderr.write("> git %s\n" % args)
     except NameError:
         # Config may not be defined yet.
         pass
 
     try:
-        child = subprocess.Popen("git " + args, shell=True, stdin=None, stdout=stdout_to, stderr=subprocess.PIPE)
+        child = subprocess.Popen([GitBinary] + args, stdin=None, stdout=stdout_to, stderr=subprocess.PIPE)
         (stdout, stderr) = child.communicate()
-    except OSError, e:
+    except OSError as e:
         error("cannot start git: %s" % str(e))
 
     if child.returncode != 0 and stderr:
@@ -316,6 +395,9 @@ def git(args, stdout_to=subprocess.PIPE, all=False):
 
     if stdout_to != subprocess.PIPE:
         return []
+
+    if sys.version_info >= (3,):
+        stdout = stdout.decode("utf-8")
 
     if not all:
         return [line.strip() for line in stdout.split("\n") if line]
@@ -341,7 +423,7 @@ def getTags(state):
             state.tags[tag] = rev
 
 def getReachableRefs(state):
-    keys = ["'%s'" % k for k in state.heads.keys() + state.tags.keys()]
+    keys = ["'%s'" % k for k in [k.replace('\'', '\'\"\'\"\'') for k in itertools.chain(state.heads.keys(), state.tags.keys())]]
 
     if keys:
         for rev in git(["rev-list"] + keys):
@@ -404,9 +486,11 @@ def deleteTmps():
         smtp_session.quit()
 
 def mailTag(key, value):
-    return "%-11s: %s" % (key, value)
+    return "%-11s: %s\n" % (key, value)
 
 def encodeHeader(hdr):
+    if sys.version_info >= (3,):
+        return hdr
     try:
         hdr.decode('ascii')
     except UnicodeDecodeError:
@@ -444,8 +528,14 @@ def getRepo():
 
 def startMailBody():
     (out, fname) = makeTmp()
-    print >>out, mailTag("Repository", getRepo())
+    out.write(mailTag("Repository", getRepo()))
     return (out, fname)
+
+def addCustomHeaders(msg):
+    headers = Config.getMailHeaders()
+
+    for k, v in iteritems(headers):
+        msg.add_header(k, encodeHeader(v))
 
 def generateMail(subject, body, rev, type):
     if Config.mailsubjectlen:
@@ -503,6 +593,8 @@ def generateMail(subject, body, rev, type):
 
     msg['X-Git-Repository'] = encodeHeader(repo)
     msg['X-Mailer'] = encodeHeader('%s %s' % (Name, VERSION))
+    addCustomHeaders(msg)
+
     msg.attach(email.mime.text.MIMEText(body, 'plain', 'utf-8'))
     msg.attach(email.mime.text.MIMEText(htmlify.htmlify(body), 'html', 'utf-8'))
 
@@ -514,8 +606,8 @@ def sendMail(subject, out, fname, rev=None, type=None):
     msg = generateMail(subject, open(fname).read(), rev, type)
 
     if Config.debug:
-        print msg
-        print ""
+        print(msg)
+        print("")
 
     elif Config.mailserver:
         try:
@@ -548,7 +640,7 @@ def sendMail(subject, out, fname, rev=None, type=None):
 
     else:
         stdin = subprocess.Popen(Config.mailcmd, shell=True, stdin=subprocess.PIPE).stdin
-        print >>stdin, msg
+        stdin.write(msg.encode("utf-8") + "\n".encode("utf-8"))
         stdin.close()
 
     # Wait a bit in case we're going to send more mails. Otherwise, the mails
@@ -565,8 +657,8 @@ def entryAdded(key, value, rev):
 
     (out, fname) = startMailBody()
 
-    print >>out, mailTag("New %s" % key, value)
-    print >>out, mailTag("Referencing", rev)
+    out.write(mailTag("New %s" % key, value))
+    out.write(mailTag("Referencing", rev))
 
     sendMail("%s '%s' created" % (key, value), out, fname, rev, type=key)
 
@@ -578,7 +670,7 @@ def entryDeleted(key, value):
 
     (out, fname) = startMailBody()
 
-    print >>out, mailTag("Deleted %s" % key, value)
+    out.write(mailTag("Deleted %s" % key, value))
 
     sendMail("%s '%s' deleted" % (key, value), out, fname)
 
@@ -611,12 +703,12 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd, stat_cmd):
     multi = "es" if len(heads) > 1 else ""
     heads = ",".join(heads)
 
-    print >>out, mailTag("On branch%s" % multi, heads)
+    out.write(mailTag("On branch%s" % multi, heads))
 
     if Config.link:
         url = Config.link.replace("%s", rev)
         url = url.replace("%r", getRepoName())
-        print >>out, mailTag("Link", url)
+        out.write(mailTag("Link", url))
 
     footer = ""
     show = git(show_cmd)
@@ -666,27 +758,27 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd, stat_cmd):
             tmp.close()
             footer = "\nDiff suppressed because of size. To see it, use:\n\n    git %s" % diff_cmd
 
-    print >>out, Separator
+    out.write(Separator)
 
     for line in git(show_cmd, all=True):
         if line == "---":
-            print >>out, Separator
+            out.write(Separator)
         else:
-            print >>out, line
+            out.write(line + "\n")
 
-    print >>out, Separator
+    out.write(Separator)
 
     if tname:
         for line in open(tname):
-            print >>out, line,
+            out.write(line)
 
-    print >>out, footer
+    out.write(footer + "\n")
 
     if Config.debug:
-        print >>out, "-- "
-        print >>out, "debug: show_cmd = git %s" % show_cmd
-        print >>out, "debug: diff_cmd = git %s" % diff_cmd
-        print >>out, "debug: stat_cmd = git %s" % stat_cmd
+        out.write("-- \n")
+        out.write("debug: show_cmd = git %s\n" % show_cmd)
+        out.write("debug: diff_cmd = git %s\n" % diff_cmd)
+        out.write("debug: stat_cmd = git %s\n" % stat_cmd)
 
     sendMail(subject, out, fname, rev)
 
@@ -723,7 +815,7 @@ def commit(current, rev, force=False, subject_head=None):
     subject = "%s: %s" % (subject_head, subject[0])
 
     show_cmd = "show -s --no-color --pretty=medium %s" % rev
-    diff_cmd = "diff-tree --root --patch-with-stat --no-color --ignore-space-at-eol --textconv %s %s" % (merge_diff, rev)
+    diff_cmd = "diff-tree --root --patch-with-stat --no-color --ignore-space-at-eol --textconv --ext-diff %s %s" % (merge_diff, rev)
     stat_cmd = "diff-tree --root --stat --no-color --ignore-space-at-eol %s" % rev
 
     sendChangeMail(rev, subject, heads, show_cmd, diff_cmd, stat_cmd)
@@ -785,11 +877,10 @@ def headMoved(head, path):
 
     (out, fname) = startMailBody()
 
-    print >>out, "Branch '%s' now includes:" % head
-    print >>out, ""
+    out.write("Branch '%s' now includes:\n\n" % head)
 
     for rev in path:
-        print >>out, "    ", git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0]
+        out.write("    %s\n" % git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0])
 
     sendMail("%s's head updated: %s" % (head, subject[0]), out, fname)
 
@@ -799,7 +890,7 @@ log("Running for %s" % os.getcwd())
 
 if Config.debug:
     for (name, arg, default, help) in Options:
-        print >>sys.stderr, "[Option %s: %s]" % (name, Config.__dict__[name])
+        sys.stderr.write("[Option %s: %s]\n" % (name, Config.__dict__[name]))
 
 cache = State()
 
