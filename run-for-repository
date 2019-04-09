@@ -1,0 +1,100 @@
+#!/bin/bash
+
+config_read_file() {
+    (grep -E "^${2}=" -m 1 "${1}" 2>/dev/null || echo "VAR=__UNDEFINED__") | head -n 1 | cut -d '=' -f 2-;
+}
+
+config_get() {
+    val="$(config_read_file .git-notifier "${1}")";
+    if [ "${val}" = "__UNDEFINED__" ]; then
+        val="";
+    fi
+    printf -- "%s" "${val}";
+}
+
+REPOSITORY="$1";
+CALL_DIRECTORY=$(pwd)
+GITNOTIFIER_BASE=$(dirname $0)
+
+if [ -z "${REPOSITORY}" ]; then
+    echo Run with
+    echo "   run-for-repository /path/to/repository"
+    exit 0
+fi
+
+cd $REPOSITORY
+REPONAME=$(basename $(pwd))
+
+if [ ! -f .git-notifier ]; then
+    echo "No .git-notifier file found in ${REPOSITORY}";
+    exit 0
+fi
+
+# myvar="$(config_get myvar)"; # how to just read a value without echoing
+RECIPIENT_USER="$(config_get recipient)";
+RECIPIENT_HOST="$(config_get recipient_domain)";
+if [ -z "${RECIPIENT_USER}" ] || [ -z "${RECIPIENT_HOST}" ]; then
+    echo No recipient defined
+    exit 1
+fi
+
+SENDER_NAME=$(config_get sender)
+if [ -z "${SENDER_NAME}" ]; then
+    SENDER_NAME=Jenkins
+fi
+
+REPLYTO_USER="$(config_get replyto)";
+REPLYTO_HOST="$(config_get replyto_domain)";
+if [ -z "${REPLYTO_USER}" ] || [ -z "${REPLYTO_HOST}" ]; then
+    REPLYTO_USER="${RECIPIENT_USER}"
+    REPLYTO_HOST="${RECIPIENT_HOST}"
+fi
+
+LINK="$(config_get link)";
+if [ -z "${LINK}" ]; then
+    LINK_PARAMETER=""
+else
+    LINK_PARAMETER="--repouri"
+fi
+
+COMMITLINK="$(config_get commit_link)";
+if [ -z "${COMMITLINK}" ]; then
+    COMMITLINK_PARAMETER=""
+else
+    COMMITLINK_PARAMETER="--link"
+fi
+
+echo "Preparing to run for repository ${REPONAME}"
+git fetch
+git clean -dff .
+git reset --hard "$(git rev-parse --abbrev-ref --symbolic-full-name @{u})"
+
+echo
+git log -1
+echo
+
+COMMITSELECT=""
+if [ ! -z "$OLDCOMMITID" ]; then
+  echo
+  echo Checking for previous commit ID ${OLDCOMMITID}
+  set +e
+  git rev-parse --quiet --verify ${OLDCOMMITID}^{commit} && {
+    COMMITSELECT="--manual ${OLDCOMMITID}..$(git rev-parse HEAD)"
+    echo Commit found! Selecting $COMMITSELECT
+  }
+  set -e
+fi
+
+echo "Notifying for repository ${REPONAME}"
+
+${GITNOTIFIER_BASE}/git-notifier \
+  --mailinglist "${RECIPIENT_USER}@${RECIPIENT_HOST}" \
+  --log "${CALL_DIRECTORY}/log-${REPONAME}" \
+  --sender="${SENDER_NAME} <diamondlightsource.jenkins@gmail.com>" \
+  --replyto="${REPLYTO_USER}@${REPLYTO_HOST}" \
+  ${LINK_PARAMETER} "${LINK}" \
+  ${COMMITLINK_PARAMETER} "${COMMITLINK}" \
+  ${COMMITSELECT}
+
+${GITNOTIFIER_BASE}/git-notifier --updateonly \
+  --log "${CALL_DIRECTORY}/log-${REPONAME}"
