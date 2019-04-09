@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# die on any error
+set -e
+
 config_read_file() {
     (grep -E "^${2}=" -m 1 "${1}" 2>/dev/null || echo "VAR=__UNDEFINED__") | head -n 1 | cut -d '=' -f 2-;
 }
@@ -19,7 +22,7 @@ GITNOTIFIER_BASE=$(dirname $0)
 if [ -z "${REPOSITORY}" ]; then
     echo Run with
     echo "   run-for-repository /path/to/repository"
-    exit 0
+    exit
 fi
 
 cd $REPOSITORY
@@ -27,7 +30,7 @@ REPONAME=$(basename $(pwd))
 
 if [ ! -f .git-notifier ]; then
     echo "No .git-notifier file found in ${REPOSITORY}";
-    exit 0
+    exit
 fi
 
 # myvar="$(config_get myvar)"; # how to just read a value without echoing
@@ -84,6 +87,12 @@ if [ ! -z "$OLDCOMMITID" ]; then
   }
   set -e
 fi
+
+touch "${CALL_DIRECTORY}/log-${REPONAME}"
+
+# terminate leftover 'tail' processes on exit
+trap 'kill $(jobs -p)' SIGINT SIGTERM EXIT
+tail -f -n 0 "${CALL_DIRECTORY}/log-${REPONAME}" &
 
 echo "Notifying for repository ${REPONAME}"
 
