@@ -83,6 +83,7 @@ else:
 
 sender = os.environ["GL_USER"] if gitolite else None
 smtp_session = None
+first_mail = True
 
 Options = [
     # Name, argument, default, help,
@@ -601,9 +602,20 @@ def generateMail(subject, body, rev, type):
     return msg.as_string()
 
 def sendMail(subject, out, fname, rev=None, type=None):
+    global first_mail
+
     out.close()
 
     msg = generateMail(subject, open(fname).read(), rev, type)
+
+    # Wait a bit in case we're going to send more mails. Otherwise, the mails
+    # get sent back-to-back and are likely to end up with identical timestamps,
+    # which may then make them appear to have arrived in the wrong order.
+    if not Config.debug:
+        if first_mail:
+            first_mail = False
+        else:
+            time.sleep(70)
 
     if Config.debug:
         print(msg)
@@ -642,12 +654,6 @@ def sendMail(subject, out, fname, rev=None, type=None):
         stdin = subprocess.Popen(Config.mailcmd, shell=True, stdin=subprocess.PIPE).stdin
         stdin.write(msg.encode("utf-8") + "\n".encode("utf-8"))
         stdin.close()
-
-    # Wait a bit in case we're going to send more mails. Otherwise, the mails
-    # get sent back-to-back and are likely to end up with identical timestamps,
-    # which may then make them appear to have arrived in the wrong order.
-    if not Config.debug:
-        time.sleep(60)
 
 def entryAdded(key, value, rev):
     if not reportHead(value):
