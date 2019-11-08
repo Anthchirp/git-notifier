@@ -732,13 +732,13 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd, stat_cmd):
         'xia2': 'https://github.com/xia2/xia2/commit/{0}',
       }.get(dirname, "{dirname}/{commit} by {author}".format(commit=show[0], author=author, dirname=dirname)).format(rev)
       subprocess.call([
-          "/dls/mx-scratch/jenkins/git-notify/jira",
+          "/dls/science/groups/scisoft/DIALS/Jenkins/jira",
           "say",
           ticket[1],
            "closed by Jenkins via {URL}".format(URL=URL),
           ], shell=False)
       subprocess.call([
-          "/dls/mx-scratch/jenkins/git-notify/jira",
+          "/dls/science/groups/scisoft/DIALS/Jenkins/jira",
           "done",
           ticket[1],
           ], shell=False)
