@@ -18,7 +18,10 @@ config_get() {
 REPOSITORY="$1";
 CALL_DIRECTORY=$(pwd)
 GITNOTIFIER_BASE=$(dirname $0)
-BRANCH=master
+BRANCH="$(config_get branch)";
+if [ -z "${BRANCH}" ]; then
+    BRANCH="master"
+fi
 
 if [ -z "${REPOSITORY}" ]; then
     echo Run with
